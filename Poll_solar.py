@@ -142,7 +142,8 @@ def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
 
 
 config = configparser.ConfigParser()
-config.read('poll_solar.ini')
+config.read(sys.path[0] + '/poll_solar.ini')
+
 
 user = config['Database']['user']
 password = config['Database']['password']
