@@ -120,7 +120,7 @@ def add_data(power_now, reading_utc_time):
         connection.commit()
         print("Successfully added entry to database at " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
         logging.info("Successfully added entry to database at " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-    except database.Error as e:
+    except database_connect.Error as e:
         print(f"Error adding entry to database: {e}")
         logging.error(f"Error adding entry to database: {e}")
         connect_to_db()
@@ -135,6 +135,7 @@ def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
         # Create a critical level log message with info from the except hook.
+    print("Unhandled exception", exc_info=(exc_type, exc_value, exc_traceback))
     logger.critical("Unhandled exception", exc_info=(exc_type, exc_value, exc_traceback))
 
 
