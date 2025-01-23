@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
-
 
 import requests
 import mysql.connector as database_connect
@@ -15,23 +13,19 @@ import configparser
 
 def connect_to_db():
     try:
-        global cursor
-        global connection
-        print(user,password,host,database)
-        connection = database_connect.connect(
+        print(user, password, host, database)
+        establish_connection = database_connect.connect(
             user=user,
             password=password,
             host=host,
             database=database)
-        cursor = connection.cursor()
+        establish_cursor = establish_connection.cursor()
         print('Connected to database.')
         logging.info('Connected to database.')
+        return establish_connection, establish_cursor
     except Exception as e:
         print(e)
         logging.error(e)
-
-
-# In[2]:
 
 
 def get_data():
@@ -98,35 +92,29 @@ def get_data():
     index_end = html.find(";", index_start) - 1
 
     try:
-        power_now = int(html[index_start:index_end])
+        get_power_now = int(html[index_start:index_end])
     except ValueError as ve:
         print('Power Output was not found/not a number :' + str(ve))
         logging.error('Power Output was not found/not a number :' + str(ve))
-        power_now = None
-    return (power_now)
+        get_power_now = None
+    return get_power_now
 
 
-# In[3]:
-
-
-def add_data(power_now, reading_utc_time):
+def add_data(use_connection, use_cursor, add_power_now, add_reading_utc_time):
     try:
         statement = "INSERT INTO inverterdata (Power, reading_utc_time) VALUES (%s, %s)"
-        print(power_now, str(reading_utc_time))
-        logging.info(str(power_now) + "W at " + str(reading_utc_time))
-        data = (power_now, reading_utc_time)
-        global cursor
-        cursor.execute(statement, data)
-        connection.commit()
+        print(add_power_now, str(add_reading_utc_time))
+        logging.info(str(add_power_now) + "W at " + str(add_reading_utc_time))
+        data = (add_power_now, add_reading_utc_time)
+        use_cursor.execute(statement, data)
+        use_connection.commit()
         print("Successfully added entry to database at " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
         logging.info("Successfully added entry to database at " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+        return True
     except database_connect.Error as e:
         print(f"Error adding entry to database: {e}")
         logging.error(f"Error adding entry to database: {e}")
-        connect_to_db()
-
-
-# In[4]:
+        return False
 
 
 def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
@@ -135,42 +123,56 @@ def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
         # Create a critical level log message with info from the except hook.
-    print("Unhandled exception", exc_info=(exc_type, exc_value, exc_traceback))
+    print("Unhandled exception", (exc_type, exc_value, exc_traceback))
     logger.critical("Unhandled exception", exc_info=(exc_type, exc_value, exc_traceback))
 
 
-# In[ ]:
+if __name__ == '__main__':
+    # set up config parser to use ini poll_solar.ini
+    config = configparser.ConfigParser()
+    config.read(sys.path[0] + '/poll_solar.ini')
+    # read variables from config
+    user = config['Database']['user']
+    password = config['Database']['password']
+    host = config['Database']['host']
+    database = config['Database']['database']
 
+    status_website_url = config['Inverter']['status_website_url']
+    status_user_name = config['Inverter']['status_user_name']
+    status_password = config['Inverter']['status_password']
+    login_website_url = config['Inverter']['login_website_url']
+    login_user_name = config['Inverter']['login_user_name']
+    login_password = config['Inverter']['login_password']
 
-config = configparser.ConfigParser()
-config.read(sys.path[0] + '/poll_solar.ini')
+    # set up logger
+    logging.basicConfig(filename=sys.path[0] + "/logs_solar.log", filemode="w",
+                        format="%(asctime)s ? %(levelname)s: %(message)s", level=logging.INFO)
+    logger = logging.getLogger('MyLogger')
 
+    # set up exception handling
+    sys.excepthook = handle_unhandled_exception
 
-user = config['Database']['user']
-password = config['Database']['password']
-host = config['Database']['host']
-database = config['Database']['database']
+    # Connect to database
+    print('Connecting, please wait...')
+    connection, cursor = connect_to_db()
+    starttime = time.monotonic()
 
-status_website_url = config['Inverter']['status_website_url']
-status_user_name = config['Inverter']['status_user_name']
-status_password = config['Inverter']['status_password']
-login_website_url = config['Inverter']['login_website_url']
-login_user_name = config['Inverter']['login_user_name']
-login_password = config['Inverter']['login_password']
-
-logging.basicConfig(filename=sys.path[0] + "/logs_solar.log", filemode="w",
-                    format="%(asctime)s ? %(levelname)s: %(message)s", level=logging.INFO)
-logger = logging.getLogger('MyLogger')
-
-sys.excepthook = handle_unhandled_exception  # does nothing in Jupyter Notebook
-
-print('Connecting, please wait...')
-connect_to_db()
-starttime = time.monotonic()
-while True:
-    power_now = get_data()
-    reading_utc_time = datetime.datetime.now(datetime.timezone.utc)
-    add_data(power_now, reading_utc_time)
-    time.sleep(180.0 - ((time.monotonic() - starttime) % 180.0))
-
-# ######
+    # Main Loop
+    while True:
+        # get power output data from inverter
+        power_now = get_data()
+        # get time
+        reading_utc_time = datetime.datetime.now(datetime.timezone.utc)
+        # add data to database if power output is valid
+        if power_now is not None:
+            success: bool = add_data(connection, cursor, power_now, reading_utc_time)
+            # if there was no database connection, reconnect
+            if not success:
+                print('Could not add entry to database, attempting reconnect...')
+                logging.error('Could not add entry to database, attempting reconnect...')
+                connection, cursor = connect_to_db()
+        else:
+            print('Power Output not a number, will not be added to database, skipping...')
+            logging.error('Power Output not a number, will not be added to database, skipping...')
+        # sleep 3 minutes, then repeat
+        time.sleep(180.0 - ((time.monotonic() - starttime) % 180.0))
